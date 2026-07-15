@@ -17,10 +17,13 @@ from functools import lru_cache
 from typing import List, Optional
 
 # Model roles are env-configurable so the demo is easy to retune.
-# Strong+fast model for answers + plans; lighter model for the mechanical
-# rewrite/grade steps. Any Gemini id works (e.g. gemini-2.5-pro, gemini-3.5-flash).
-GEN_MODEL = os.getenv("GEN_MODEL", "gemini-3-flash-preview")
-FAST_MODEL = os.getenv("FAST_MODEL", "gemini-3-flash-preview")
+# Strong+fast model for answers + plans; a lighter/faster model for the
+# mechanical rewrite/grade steps. Splitting them also spreads calls across two
+# free-tier daily quota buckets. NOTE: gemini-3-flash-preview is ~10-18s/call
+# (a chat makes 3-5 calls -> hits the serverless timeout), so we default to the
+# fast, stable flash/flash-lite models instead. Any Gemini id works.
+GEN_MODEL = os.getenv("GEN_MODEL", "gemini-2.5-flash")
+FAST_MODEL = os.getenv("FAST_MODEL", "gemini-flash-lite-latest")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "models/gemini-embedding-001")
 
 # "auto" = use Google dense embeddings when a key is present. Set to "none" to
