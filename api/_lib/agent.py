@@ -79,6 +79,7 @@ class BotState(TypedDict, total=False):
     answer: str
     citations: List[dict]
     escalated: bool
+    llm_failed: bool  # generation couldn't run (no key / 429 / timeout) -> client fallback
     gap_id: Optional[str]
     question_id: Optional[str]
     routed_to: Optional[str]
@@ -191,6 +192,7 @@ def n_answer(state: BotState) -> BotState:
             ),
             "citations": [],
             "escalated": False,
+            "llm_failed": True,  # -> the API returns needs_client_fallback so the client uses Puter
             "confidence": state.get("confidence", 0.0),
             "trace": _log(state, f"answer → model error: {exc}"),
         }
@@ -215,28 +217,29 @@ def n_answer(state: BotState) -> BotState:
     }
 
 
-def n_escalate(state: BotState) -> BotState:
-    store = get_store()
-    reason = f"Low retrieval confidence ({state.get('confidence', 0):.2f}); no supporting docs found."
-    gap: Gap = store.add_gap(
-        question=state["question"],
-        reason=reason,
-        asked_by=state.get("employee_id"),
-        role=state.get("role"),
-    )
-    # Route the question to the asker's assigned mentor for a human answer.
+def escalate_question(store, question, employee_id=None, role=None, confidence=None):
+    """Log a knowledge gap and route the question to the asker's mentor.
+
+    Shared by the graph's escalate node and the `/api/escalate` endpoint (the
+    client fallback path calls the endpoint when the free in-browser model
+    decides the docs don't cover the question).
+    """
+    if confidence is None:
+        reason = "The company knowledge base doesn't appear to cover this question."
+    else:
+        reason = f"Low retrieval confidence ({confidence:.2f}); no supporting docs found."
+    gap: Gap = store.add_gap(question=question, reason=reason, asked_by=employee_id, role=role)
     routed_to = None
     question_id = None
-    emp = store.employee_by_id(state.get("employee_id") or "")
+    emp = store.employee_by_id(employee_id or "")
     if emp and emp.get("mentor_id"):
         mentor = store.mentor_by_id(emp["mentor_id"])
         q = store.add_question(
-            question=state["question"], mentee_id=emp["id"], mentee_name=emp.get("name"),
+            question=question, mentee_id=emp["id"], mentee_name=emp.get("name"),
             mentor_id=emp["mentor_id"], reason=reason, gap_id=gap.id,
         )
         question_id = q.id
         routed_to = mentor["name"] if mentor else None
-
     where = f" to your mentor {routed_to}" if routed_to else " to a human mentor"
     msg = (
         f"I couldn't find a confident answer to this in the company knowledge base, so "
@@ -245,12 +248,28 @@ def n_escalate(state: BotState) -> BotState:
     )
     return {
         "answer": msg,
-        "citations": [],
-        "escalated": True,
         "gap_id": gap.id,
         "question_id": question_id,
         "routed_to": routed_to,
-        "trace": _log(state, f"escalate → gap {gap.id}" + (f", routed to {routed_to}" if routed_to else "")),
+        "reason": reason,
+    }
+
+
+def n_escalate(state: BotState) -> BotState:
+    store = get_store()
+    esc = escalate_question(
+        store, state["question"],
+        employee_id=state.get("employee_id"), role=state.get("role"),
+        confidence=state.get("confidence", 0.0),
+    )
+    return {
+        "answer": esc["answer"],
+        "citations": [],
+        "escalated": True,
+        "gap_id": esc["gap_id"],
+        "question_id": esc["question_id"],
+        "routed_to": esc["routed_to"],
+        "trace": _log(state, f"escalate → gap {esc['gap_id']}" + (f", routed to {esc['routed_to']}" if esc["routed_to"] else "")),
     }
 
 
@@ -317,6 +336,7 @@ def run_onboardbot(question: str, role=None, team=None, employee_id=None) -> Bot
             "citations": [],
             "confidence": 0.0,
             "escalated": False,
+            "llm_failed": True,  # -> client fallback (Puter) with the retrieved context
             "trace": [f"timeout: chat exceeded {CHAT_BUDGET_SECONDS:.0f}s budget"],
         }
 

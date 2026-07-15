@@ -20,6 +20,8 @@ from .models import (
     ChatRequest,
     ChatResponse,
     Citation,
+    ContextChunk,
+    EscalateRequest,
     GenerateForMenteeRequest,
     LoginRequest,
     LoginResponse,
@@ -99,15 +101,35 @@ def me(user: User = Depends(current_user)):
 
 
 # ─── chat (OnboardBot) — any authenticated user ───────────────────────────────
+def _fallback_context(store, question: str) -> List[ContextChunk]:
+    """Retrieved chunks (BM25 works without a key) for the client to ground a
+    free in-browser (Puter.js) answer against when the backend LLM is down."""
+    cands = rag.retrieve_candidates(store.index, question, k=agent.TOP_K)
+    return [
+        ContextChunk(
+            chunk_id=c["chunk_id"], doc_id=c["doc_id"], doc_title=c["doc_title"],
+            heading=c["heading"], text=c["text"], score=c.get("retrieval_score", 0.0),
+        )
+        for c in cands
+    ]
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, user: User = Depends(current_user)):
+    store = get_store()
+    # No key on the server -> let the client answer for free via Puter.js, grounded
+    # in the retrieved context (no 503; the browser has the model).
     if not llm.has_key():
-        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not set on the server.")
+        return ChatResponse(
+            answer="Answering with the free in-browser model…",
+            needs_client_fallback=True,
+            context=_fallback_context(store, req.question),
+        )
     # Identity comes from the session, not the request body (no spoofing).
     result = agent.run_onboardbot(
         question=req.question, role=user.role, team=user.team, employee_id=user.id
     )
-    return ChatResponse(
+    resp = ChatResponse(
         answer=result.get("answer", ""),
         citations=[Citation(**c) for c in result.get("citations", [])],
         confidence=result.get("confidence", 0.0),
@@ -116,6 +138,29 @@ def chat(req: ChatRequest, user: User = Depends(current_user)):
         question_id=result.get("question_id"),
         routed_to=result.get("routed_to"),
         trace=result.get("trace", []),
+    )
+    # Backend generation couldn't run (rate-limited / timeout) -> hand off to the
+    # client's free Puter.js model with the retrieved context so the demo still works.
+    if result.get("llm_failed"):
+        resp.needs_client_fallback = True
+        resp.context = _fallback_context(store, req.question)
+    return resp
+
+
+@app.post("/api/escalate", response_model=ChatResponse)
+def escalate(req: EscalateRequest, user: User = Depends(current_user)):
+    """Log a KB gap and route the question to the asker's mentor. Called by the
+    client fallback path when the free in-browser model can't answer from the
+    docs — keeping the human-in-the-loop working without the backend LLM."""
+    store = get_store()
+    esc = agent.escalate_question(store, req.question, employee_id=user.id, role=user.role)
+    return ChatResponse(
+        answer=esc["answer"],
+        escalated=True,
+        gap_id=esc["gap_id"],
+        question_id=esc["question_id"],
+        routed_to=esc["routed_to"],
+        trace=[f"escalate → gap {esc['gap_id']}" + (f", routed to {esc['routed_to']}" if esc["routed_to"] else "")],
     )
 
 

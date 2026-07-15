@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Send, Bot, User, ShieldAlert, Sparkles, Route } from 'lucide-react'
+import { Send, Bot, User, ShieldAlert, Sparkles, Route, Cloud } from 'lucide-react'
 import { api } from '../api'
+import { puterReady, puterAnswer, citationsFromAnswer } from '../puter'
 import CitationChip from './CitationChip'
 import Logo from './Logo'
 
@@ -47,6 +48,10 @@ export default function ChatWidget({ onEscalate }) {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, busy])
 
+  function push(msg) {
+    setMessages((m) => [...m, { role: 'bot', ...msg }])
+  }
+
   async function ask(question) {
     if (!question.trim() || busy) return
     setInput('')
@@ -54,10 +59,39 @@ export default function ChatWidget({ onEscalate }) {
     setBusy(true)
     try {
       const res = await api.chat(question)
-      setMessages((m) => [...m, { role: 'bot', ...res }])
-      if (res.escalated) onEscalate?.()
+
+      // Backend answered normally.
+      if (!res.needs_client_fallback || !puterReady()) {
+        push(res)
+        if (res.escalated) onEscalate?.()
+        return
+      }
+
+      // Backend LLM unavailable (no key / rate-limited) -> generate for free in
+      // the browser via Puter.js, grounded in the context the backend returned.
+      try {
+        const { answer, noAnswer } = await puterAnswer(question, res.context)
+        if (noAnswer) {
+          // Docs don't cover it -> keep the human-in-the-loop: log a gap + route to mentor.
+          const esc = await api.escalate(question)
+          push({ ...esc, source: 'puter' })
+          onEscalate?.()
+        } else {
+          push({
+            answer,
+            citations: citationsFromAnswer(answer, res.context),
+            confidence: 0.7,
+            escalated: false,
+            source: 'puter',
+            trace: ['backend rate-limited → generated in-browser with Puter.js (free Gemini)'],
+          })
+        }
+      } catch (perr) {
+        // Puter failed/declined too -> show the backend's graceful message.
+        push({ ...res, answer: `${res.answer}\n\n(In-browser fallback unavailable: ${perr.message})` })
+      }
     } catch (e) {
-      setMessages((m) => [...m, { role: 'bot', answer: `⚠️ ${e.message}`, citations: [], error: true }])
+      push({ answer: `⚠️ ${e.message}`, citations: [], error: true })
     } finally {
       setBusy(false)
     }
@@ -119,6 +153,14 @@ export default function ChatWidget({ onEscalate }) {
                     {m.escalated && (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
                         routed to {m.routed_to || 'a mentor'}
+                      </span>
+                    )}
+                    {m.source === 'puter' && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700"
+                        title="Backend was rate-limited — answered for free in your browser via Puter.js"
+                      >
+                        <Cloud size={11} /> via Puter · free
                       </span>
                     )}
                   </div>
