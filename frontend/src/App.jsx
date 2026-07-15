@@ -28,10 +28,12 @@ function Shell() {
     user.role === 'admin' ? AdminDashboard : user.role === 'mentor' ? MentorDashboard : MenteeDashboard
 
   return (
-    <div className="mx-auto min-h-screen max-w-6xl px-4 py-6">
+    <div className="min-h-screen">
       <Navbar />
-      <Dashboard />
-      <BackendStatus />
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        <Dashboard />
+        <BackendStatus />
+      </main>
     </div>
   )
 }
