@@ -45,7 +45,6 @@ export const api = {
 
   // shared
   chat: (question) => req('/chat', json({ question })),
-  escalate: (question) => req('/escalate', json({ question })),
   search: (q, k = 6) => req(`/search?q=${encodeURIComponent(q)}&k=${k}`),
 
   // mentee

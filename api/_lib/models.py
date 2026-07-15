@@ -39,18 +39,6 @@ class Citation(BaseModel):
     score: float = 0.0
 
 
-class ContextChunk(BaseModel):
-    """A retrieved chunk with its full text — sent to the client so it can
-    generate a grounded answer with the free in-browser model (Puter.js) when
-    the backend LLM is unavailable (no key / rate-limited)."""
-    chunk_id: str
-    doc_id: str
-    doc_title: str
-    heading: str
-    text: str
-    score: float = 0.0
-
-
 # ─── Chat (OnboardBot) ────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     question: str
@@ -69,15 +57,6 @@ class ChatResponse(BaseModel):
     question_id: Optional[str] = None
     routed_to: Optional[str] = None  # mentor name, when escalated
     trace: List[str] = Field(default_factory=list)
-    # When the backend LLM couldn't answer (no key / rate-limited / timeout), the
-    # client should generate the answer itself with Puter.js free Gemini, using
-    # `context` (the retrieved chunks) to keep it grounded + cited.
-    needs_client_fallback: bool = False
-    context: List[ContextChunk] = Field(default_factory=list)
-
-
-class EscalateRequest(BaseModel):
-    question: str
 
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────
