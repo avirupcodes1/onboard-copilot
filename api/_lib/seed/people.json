@@ -1,0 +1,12 @@
+{
+  "mentors": [
+    { "id": "mentor-1", "name": "Sarah Chen", "specialty": "Engineering & Architecture", "team": "Engineering", "initials": "SC" },
+    { "id": "mentor-2", "name": "Mike Johnson", "specialty": "Sales & Business Development", "team": "Sales", "initials": "MJ" },
+    { "id": "mentor-3", "name": "Priya Patel", "specialty": "Design & Product", "team": "Product", "initials": "PP" }
+  ],
+  "employees": [
+    { "id": "emp-1", "name": "Jordan Lee", "role": "Software Engineer", "team": "Engineering", "mentor_id": "mentor-1", "start_date": "2026-07-06", "day": 3, "total_days": 30, "initials": "JL" },
+    { "id": "emp-2", "name": "Priya Kapoor", "role": "Product Manager", "team": "Product", "mentor_id": "mentor-3", "start_date": "2026-07-01", "day": 8, "total_days": 30, "initials": "PK" },
+    { "id": "emp-3", "name": "Marcus Stone", "role": "Sales Representative", "team": "Sales", "mentor_id": "mentor-2", "start_date": "2026-06-29", "day": 10, "total_days": 21, "initials": "MS" }
+  ]
+}

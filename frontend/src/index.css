@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+/* Markdown answers from the bot */
+.prose-bot p { margin: 0.4rem 0; }
+.prose-bot ul { margin: 0.4rem 0; padding-left: 1.1rem; list-style: disc; }
+.prose-bot ol { margin: 0.4rem 0; padding-left: 1.2rem; list-style: decimal; }
+.prose-bot code { background: #eef2ff; padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.85em; }
+.prose-bot strong { font-weight: 600; }

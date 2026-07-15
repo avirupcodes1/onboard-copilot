@@ -1,0 +1,22 @@
+# Backend runtime deps (Vercel Python runtime reads this at build time).
+# Kept lean so the serverless bundle stays well under Vercel's size limit.
+#
+# Ranges (not exact pins) let pip resolve a mutually-compatible modern set —
+# langchain-google-genai 4.x rides on the LangChain 1.x line, and langgraph 1.x
+# uses the same core, so pinning one exact version tends to fight the others.
+fastapi>=0.115,<1.0
+pydantic>=2.9,<3.0
+python-multipart>=0.0.9
+langgraph>=0.2
+langchain-core>=0.3
+langchain-google-genai>=2.1
+rank-bm25>=0.2.2
+numpy>=1.26
+pypdf>=5.0
+
+# uvicorn is only needed for local dev (`uvicorn api.index:app`); harmless on Vercel.
+uvicorn>=0.30
+
+# Dense hybrid retrieval uses Google's embedding model via the same GEMINI_API_KEY
+# (bundled with langchain-google-genai above — no extra package needed).
+# Set EMBEDDINGS_PROVIDER=none to force BM25-only retrieval.
