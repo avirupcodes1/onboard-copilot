@@ -15,6 +15,7 @@ of hallucinating.
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
 from functools import lru_cache
 from typing import List, Optional, TypedDict
 
@@ -25,6 +26,12 @@ from .store import get_store
 CONFIDENCE_THRESHOLD = float(os.getenv("APP_CONFIDENCE_THRESHOLD", "0.5"))
 MAX_RETRIES = 1
 TOP_K = 6
+
+# Hard ceiling on a single chat so the request always returns before Vercel's
+# 60s function limit (which otherwise surfaces as a 504). Kept below 60 to leave
+# headroom for cold-start import + response serialization.
+CHAT_BUDGET_SECONDS = float(os.getenv("CHAT_BUDGET_SECONDS", "45"))
+_run_pool = ThreadPoolExecutor(max_workers=4)  # module-level; never shut down (serverless-safe)
 
 
 # ─── model output helpers ─────────────────────────────────────────────────────
@@ -176,7 +183,17 @@ def n_answer(state: BotState) -> BotState:
     try:
         answer = _as_text(llm.gen_llm(1024).invoke(prompt).content).strip()
     except Exception as exc:
-        answer = f"(model error: {exc})"
+        print(f"[answer] model error: {exc}")
+        return {
+            "answer": (
+                "I couldn't generate an answer just now — the AI service may be busy or "
+                "rate-limited. Please try again in a moment, or ask your mentor directly."
+            ),
+            "citations": [],
+            "escalated": False,
+            "confidence": state.get("confidence", 0.0),
+            "trace": _log(state, f"answer → model error: {exc}"),
+        }
     cited = set(re.findall(r"\[([a-z0-9\-]+#\d+)\]", answer))
     used = [c for c in relevant if c["chunk_id"] in cited] or relevant
     citations = [
@@ -281,7 +298,27 @@ def run_onboardbot(question: str, role=None, team=None, employee_id=None) -> Bot
         "employee_id": employee_id,
         "trace": [],
     }
-    return _graph().invoke(init)
+    graph = _graph()  # compiled once (lru_cache); compiling touches no network
+    # Run under a wall-clock budget. If the LLM/embedding calls are slow or being
+    # rate-limited, return a graceful message instead of letting the serverless
+    # function hit its 60s timeout and 504. The worker thread is abandoned (it
+    # finishes on its own); per-call caps in llm.py keep that cheap.
+    future = _run_pool.submit(graph.invoke, init)
+    try:
+        return future.result(timeout=CHAT_BUDGET_SECONDS)
+    except _FuturesTimeout:
+        return {
+            "question": question,
+            "answer": (
+                "OnboardBot is taking longer than usual to respond right now — this can "
+                "happen when the AI service is rate-limited or under load. Please try again "
+                "in a moment, or reach out to your mentor directly."
+            ),
+            "citations": [],
+            "confidence": 0.0,
+            "escalated": False,
+            "trace": [f"timeout: chat exceeded {CHAT_BUDGET_SECONDS:.0f}s budget"],
+        }
 
 
 # ─── Plan builder ─────────────────────────────────────────────────────────────

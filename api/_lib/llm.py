@@ -27,6 +27,14 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "models/gemini-embedding-001")
 # force BM25-only retrieval (skips the cold-start embedding call).
 EMBEDDINGS_PROVIDER = os.getenv("EMBEDDINGS_PROVIDER", "auto").lower()
 
+# Bound every external call so a slow or rate-limited Gemini response can't run
+# past the serverless function's 60s limit. LangChain's defaults are the trap:
+# max_retries=6 with NO timeout, so a persistent 429 retries with exponential
+# backoff for ~a minute *per call* — and a chat makes several calls -> 504.
+AI_TIMEOUT = float(os.getenv("AI_TIMEOUT", "20"))        # per-request seconds (chat)
+AI_MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "1"))   # was defaulting to 6
+EMBED_TIMEOUT = float(os.getenv("EMBED_TIMEOUT", "12"))  # hard wall-clock bound per embedding call
+
 
 def _api_key() -> Optional[str]:
     # Accept either name — Google AI Studio calls it GEMINI_API_KEY;
@@ -55,7 +63,13 @@ def chat(model: str, max_tokens: int = 1024):
     """
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    kwargs = dict(model=model, max_output_tokens=max_tokens, google_api_key=_api_key())
+    kwargs = dict(
+        model=model,
+        max_output_tokens=max_tokens,
+        google_api_key=_api_key(),
+        timeout=AI_TIMEOUT,
+        max_retries=AI_MAX_RETRIES,
+    )
     if _supports_thinking(model):
         kwargs["thinking_budget"] = 0
     return ChatGoogleGenerativeAI(**kwargs)
@@ -99,13 +113,30 @@ def _normalize(arr):
     return a / norms  # L2-normalized so dot product == cosine
 
 
+# A module-level pool lets us put a hard wall-clock bound on an embedding call.
+# GoogleGenerativeAIEmbeddings has its own default retry loop we can't easily cap
+# via the constructor, so if a call hangs (or 429-retries), we return control
+# after EMBED_TIMEOUT and fall back to BM25 instead of blocking the request. The
+# background thread finishes on its own; we don't wait for it.
+_embed_pool = None
+
+
+def _embed_bounded(fn, arg):
+    global _embed_pool
+    from concurrent.futures import ThreadPoolExecutor
+
+    if _embed_pool is None:
+        _embed_pool = ThreadPoolExecutor(max_workers=2)
+    return _embed_pool.submit(fn, arg).result(timeout=EMBED_TIMEOUT)
+
+
 def embed_documents(texts: List[str]):
     """Return an (n, d) L2-normalized numpy array, or None if disabled/failed."""
     if not _embed_enabled():
         return None
     try:
-        return _normalize(_embedder().embed_documents(list(texts)))
-    except Exception as exc:  # pragma: no cover - best effort
+        return _normalize(_embed_bounded(_embedder().embed_documents, list(texts)))
+    except Exception as exc:  # pragma: no cover - best effort (incl. timeout)
         print(f"[embeddings] disabled: {exc}")
         return None
 
@@ -114,7 +145,7 @@ def embed_query(text: str):
     if not _embed_enabled():
         return None
     try:
-        return _normalize(_embedder().embed_query(text))
-    except Exception as exc:  # pragma: no cover - best effort
+        return _normalize(_embed_bounded(_embedder().embed_query, text))
+    except Exception as exc:  # pragma: no cover - best effort (incl. timeout)
         print(f"[embeddings] disabled: {exc}")
         return None
