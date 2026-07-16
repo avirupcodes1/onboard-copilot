@@ -21,5 +21,5 @@ body {
 .prose-bot p { margin: 0.4rem 0; }
 .prose-bot ul { margin: 0.4rem 0; padding-left: 1.1rem; list-style: disc; }
 .prose-bot ol { margin: 0.4rem 0; padding-left: 1.2rem; list-style: decimal; }
-.prose-bot code { background: #eef2ff; padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.85em; }
+.prose-bot code { background: #FDECF6; padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.85em; }
 .prose-bot strong { font-weight: 600; }
